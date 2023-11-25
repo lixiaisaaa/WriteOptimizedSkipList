@@ -4,6 +4,8 @@
 #include <random>
 #include <limits.h>
 #include <time.h>
+#include <deque>
+#include <algorithm>
 #define B 6
 using namespace std;
 class Block;
@@ -132,42 +134,93 @@ public:
         // Destructor to free memory
         // ... (cleanup logic here)
     }
-    //先写flush操作作为helper，如果超了，那么就发送到下一个block中，如果block满了，标记并加入一个queue， 然后循环处理直到把queue处理完毕
+    // 先写flush操作作为helper，如果超了，那么就发送到下一个block中，如果block满了，标记并加入一个queue， 然后循环处理直到把queue处理完毕
     void upsert(int value, int opcode, int lvl)
     {
-        if(lvl > levels.size()){
+        if (lvl > levels.size())
+        {
             insert(value);
-        }else{
-            Block* block = levels[levels.size()-1];
-            block->buffer.push_back(new Node(value, nullptr, 0, 0));
-            flush(block);
-            // if(block->buffer.size() + block->vector.size() > B){
-                
-            //     for(int i=0;i<block->vector.size();i++){
-                    
-            //     }
-
-            // }
-            
         }
-        
-    }
+        else
+        {
+            Block *block = levels[levels.size() - 1];
 
-    void flush(Block* curr){
-        int sz =curr->vector.size();
-        int value = curr->buffer[0]->value;
-        bool flag = false;
-        for(int i = 0; i < sz-1;i++){
-            if (curr->vector[i+1]->value > value){
-                curr->vector[i]->down->buffer.push_back(curr->buffer[0]);
-                curr->buffer.erase(curr->buffer.begin());
-                flag = true;
-                break;
+            // Find the position to insert the new Node
+            auto it = std::lower_bound(block->buffer.begin(), block->buffer.end(), new Node(value, nullptr, opcode, lvl),
+                                       [](const Node *a, const Node *b)
+                                       {
+                                           return a->value < b->value;
+                                       });
+
+            // Insert the new Node at the correct position
+            block->buffer.insert(it, new Node(value, nullptr, 0, 0));
+
+            // full or deleted massage more than half so flush
+            if (block->buffer.size() + block->vector.size() > B || block->numberOfDeletedNode * 2 > B)
+            {
+                std::deque<Block *> queue;
+                queue.push_back(block);
+
+                // cout<<queue.size()<<endl;
+                while (!queue.empty())
+                {
+                    Block *blk = queue.front();
+                    queue.pop_front();
+                    flush(blk);
+                    blk->buffer.clear();
+                    // check down block
+                    for (int i = 0; i < blk->vector.size(); i++)
+                    {
+                        Block *downBlock = blk->vector[i]->down;
+                        if (downBlock->buffer.size() + downBlock->vector.size() > B || downBlock->numberOfDeletedNode * 2 > B)
+                        {
+                            queue.push_back(downBlock);
+                        }
+                    }
+
+                    // //check next block
+                    Block *nextBuffer = blk->next;
+                    if (nextBuffer != nullptr)
+                    {
+                        if (nextBuffer->buffer.size() + nextBuffer->vector.size() > B || nextBuffer->numberOfDeletedNode * 2 > B)
+                        {
+                            queue.push_back(nextBuffer);
+                        }
+                    }
+
+                    
+                }
             }
         }
-        if(!flag){
-            curr->vector[sz-1]->down->buffer.push_back(curr->buffer[0]);
-            curr->buffer.erase(curr->buffer.begin());
+    }
+
+    void flush(Block *curr)
+    {
+        int sz = curr->vector.size();
+        for (int j = 0; j < curr->buffer.size(); j++)
+        {
+            int value = curr->buffer[j]->value;
+            bool flag = false;
+            for (int i = 0; i < sz - 1; i++)
+            {
+                if (curr->vector[i + 1]->value > value)
+                {
+                    // cout << curr->buffer[j]->value << endl;
+                    curr->vector[i]->down->buffer.push_back(curr->buffer[j]);
+                    if(curr->buffer[j]->opcode==1){
+                        curr->vector[i]->down->numberOfDeletedNode++;
+                    }
+                    // curr->buffer.erase(curr->buffer.begin());
+                    flag = true;
+                    break;
+                }
+            }
+            if (!flag)
+            {
+                // cout<<curr->buffer[j]->value<< "最后"<<endl;
+                curr->vector[sz - 1]->down->buffer.push_back(curr->buffer[j]);
+                // curr->buffer.erase(curr->buffer.begin());
+            }
         }
     }
 
@@ -331,12 +384,11 @@ public:
                 {
 
                     cout << curr->vector[j]->value << " ";
-                    
-
                 }
-                for(int j = 0; j < curr->buffer.size(); j++){
-                        cout << "[" << curr->buffer[j]->value <<"]";
-                    }
+                for (int j = 0; j < curr->buffer.size(); j++)
+                {
+                    cout << "[" << curr->buffer[j]->value << "]";
+                }
                 curr = curr->next;
 
                 cout << "|";
@@ -442,8 +494,14 @@ int main()
     list.insert(2);
     list.insert(6);
     list.print_list();
-    cout<<"==================="<<endl;
+    cout << "===================" << endl;
+    list.upsert(1, 0, 0);
+    list.upsert(1, 0, 0);
     list.upsert(4, 0, 0);
+    list.upsert(4, 0, 0);
+    list.upsert(7, 0, 0);
+    list.upsert(4, 0, 0);
+    list.upsert(7, 0, 0);
     // list.upsert(23, 0, 3);
     list.print_list();
     // cout<<"==================="<<endl;
