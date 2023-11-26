@@ -137,16 +137,17 @@ public:
     // 先写flush操作作为helper，如果超了，那么就发送到下一个block中，如果block满了，标记并加入一个queue， 然后循环处理直到把queue处理完毕
     void upsert(int value, int opcode, int lvl)
     {
-        if (lvl > levels.size())
+        if (lvl >= levels.size())
         {
             insert(value);
         }
         else
-        {
+        {   
+            int lv = (levels.size()-1) - lvl;
             Block *block = levels[levels.size() - 1];
 
             // Find the position to insert the new Node
-            auto it = std::lower_bound(block->buffer.begin(), block->buffer.end(), new Node(value, nullptr, opcode, lvl),
+            auto it = std::lower_bound(block->buffer.begin(), block->buffer.end(), new Node(value, nullptr, opcode, lv),
                                        [](const Node *a, const Node *b)
                                        {
                                            return a->value < b->value;
@@ -156,7 +157,7 @@ public:
             block->buffer.insert(it, new Node(value, nullptr, 0, 0));
 
             // full or deleted massage more than half so flush
-            if (block->buffer.size() + block->vector.size() > B || block->numberOfDeletedNode * 2 > B)
+            if (block->buffer.size() + block->vector.size() > B)
             {
                 std::deque<Block *> queue;
                 queue.push_back(block);
@@ -168,58 +169,86 @@ public:
                     queue.pop_front();
                     flush(blk);
                     blk->buffer.clear();
+                    //cout << blk->buffer.size() << "size" << endl;
                     // check down block
                     for (int i = 0; i < blk->vector.size(); i++)
                     {
                         Block *downBlock = blk->vector[i]->down;
-                        if (downBlock->buffer.size() + downBlock->vector.size() > B || downBlock->numberOfDeletedNode * 2 > B)
+                        if (downBlock != nullptr && downBlock->buffer.size() + downBlock->vector.size() > B)
                         {
                             queue.push_back(downBlock);
                         }
                     }
 
-                    // //check next block
+                    // check next block
                     Block *nextBuffer = blk->next;
                     if (nextBuffer != nullptr)
                     {
-                        if (nextBuffer->buffer.size() + nextBuffer->vector.size() > B || nextBuffer->numberOfDeletedNode * 2 > B)
+                        if (nextBuffer->buffer.size() + nextBuffer->vector.size() > B)
                         {
                             queue.push_back(nextBuffer);
                         }
                     }
-
-                    
                 }
             }
         }
     }
 
+    //待优化
     void flush(Block *curr)
     {
         int sz = curr->vector.size();
         for (int j = 0; j < curr->buffer.size(); j++)
         {
+
             int value = curr->buffer[j]->value;
+            cout << value << endl;
             bool flag = false;
             for (int i = 0; i < sz - 1; i++)
             {
                 if (curr->vector[i + 1]->value > value)
                 {
                     // cout << curr->buffer[j]->value << endl;
-                    curr->vector[i]->down->buffer.push_back(curr->buffer[j]);
-                    if(curr->buffer[j]->opcode==1){
-                        curr->vector[i]->down->numberOfDeletedNode++;
+                    if (curr->vector[i]->down != nullptr)
+                    {   
+                        curr->buffer[j]->height = curr->buffer[j]->height-1;
+                        if(curr->buffer[j]->height <= 0){
+                            //待优化
+                            insert(curr->buffer[j]->value);
+                        }else{
+                            curr->vector[i]->down->buffer.push_back(curr->buffer[j]);
+
+                        }
+                        flag = true;
+                        break;
                     }
-                    // curr->buffer.erase(curr->buffer.begin());
-                    flag = true;
-                    break;
                 }
             }
+            //比所有pivot都大，特殊处理
             if (!flag)
-            {
-                // cout<<curr->buffer[j]->value<< "最后"<<endl;
-                curr->vector[sz - 1]->down->buffer.push_back(curr->buffer[j]);
-                // curr->buffer.erase(curr->buffer.begin());
+            {   
+                //push到next
+                Block *nextBlock = curr->next;
+                if (nextBlock != nullptr && nextBlock->vector[0]->value <= value)
+                {
+                    nextBlock->buffer.push_back(curr->buffer[j]);
+                }
+                //push到down
+                else
+                {
+                    if (curr->vector[sz - 1]->down != nullptr)
+                    {   
+                        curr->buffer[j]->height = curr->buffer[j]->height-1;
+                        if(curr->buffer[j]->height <= 0){
+                            //待优化
+                            insert(curr->buffer[j]->value);
+                        }else{
+                            curr->vector[sz - 1]->down->buffer.push_back(curr->buffer[j]);
+
+                        }
+                        curr->vector[sz - 1]->down->buffer.push_back(curr->buffer[j]);
+                    }
+                }
             }
         }
     }
@@ -497,12 +526,13 @@ int main()
     cout << "===================" << endl;
     list.upsert(1, 0, 0);
     list.upsert(1, 0, 0);
+
     list.upsert(4, 0, 0);
     list.upsert(4, 0, 0);
     list.upsert(7, 0, 0);
-    list.upsert(4, 0, 0);
+    // list.upsert(4, 0, 0);
     list.upsert(7, 0, 0);
-    // list.upsert(23, 0, 3);
+    list.upsert(23, 0, 5);
     list.print_list();
     // cout<<"==================="<<endl;
     //  list.remove(7);
