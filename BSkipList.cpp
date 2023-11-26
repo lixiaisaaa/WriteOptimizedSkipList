@@ -137,15 +137,15 @@ public:
     // 先写flush操作作为helper，如果超了，那么就发送到下一个block中，如果block满了，标记并加入一个queue， 然后循环处理直到把queue处理完毕
     void upsert(int value, int opcode, int lvl)
     {
-        if (lvl > levels.size())
+        if (opcode == 0 && lvl > levels.size())
         {
             insert(value);
         }
         else
         {
             Block *block = levels[levels.size() - 1];
-            
-            lvl = levels.size()-1 - lvl;
+
+            lvl = levels.size() - 1 - lvl;
             // Find the position to insert the new Node
             auto it = std::lower_bound(block->buffer.begin(), block->buffer.end(), new Node(value, nullptr, lvl, opcode),
                                        [](const Node *a, const Node *b)
@@ -153,11 +153,15 @@ public:
                                            return a->value < b->value;
                                        });
 
+            if (opcode == 1)
+            {
+                block->numberOfDeletedNode += 1;
+            }
             // Insert the new Node at the correct position
             block->buffer.insert(it, new Node(value, nullptr, lvl, opcode));
 
             // full or deleted massage more than half so flush
-            if (block->buffer.size() + block->vector.size() > B)
+            if (block->buffer.size() + block->vector.size() > B || block->numberOfDeletedNode * 2 > B)
             {
                 std::deque<Block *> queue;
                 queue.push_back(block);
@@ -177,7 +181,6 @@ public:
                         {
                             queue.push_back(downBlock);
                         }
-
                     }
 
                     // //check next block
@@ -201,19 +204,32 @@ public:
         {
             int value = curr->buffer[j]->value;
             bool flag = false;
-            cout<< value << endl;
+            cout << value << endl;
             for (int i = 0; i < sz - 1; i++)
             {
                 if (curr->vector[i + 1]->value > value)
                 {
-                    // cout << curr->buffer[j]->value << endl;
-                    curr->vector[i]->down->buffer.push_back(curr->buffer[j]);
-                    // if(curr->buffer[j]->opcode==1){
-                    //     curr->vector[i]->down->numberOfDeletedNode++;
-                    // }
-                    // curr->buffer.erase(curr->buffer.begin());
-                    flag = true;
-                    break;
+                    if (curr->vector[i]->down != nullptr)
+                    {
+                        if (curr->buffer[j]->height <= 0)
+                        {
+                             if (curr->buffer[j]->opcode == 0)
+                            {
+                                //待优化
+                                insert(curr->buffer[j]->value);
+                            }
+                            else if (curr->buffer[j]->opcode == 1)
+                            {
+                                remove(curr->buffer[j]->value);
+                            }
+                        }
+                        else
+                        {
+                            curr->vector[i]->down->buffer.push_back(curr->buffer[j]);
+                            flag = true;
+                            break;
+                        }
+                    }
                 }
             }
             if (!flag)
@@ -232,7 +248,14 @@ public:
                         if (curr->buffer[j]->height <= 0)
                         {
                             // 待优化
-                            insert(curr->buffer[j]->value);
+                            if (curr->buffer[j]->opcode == 0)
+                            {
+                                insert(curr->buffer[j]->value);
+                            }
+                            else if (curr->buffer[j]->opcode == 1)
+                            {
+                                remove(curr->buffer[j]->value);
+                            }
                         }
                         else
                         {
@@ -522,7 +545,7 @@ int main()
     list.upsert(4, 0, 0);
     list.upsert(7, 0, 0);
     list.upsert(7, 0, 0);
-    //list.upsert(23, 0, 99);
+    // list.upsert(23, 0, 99);
     list.print_list();
     // cout<<"==================="<<endl;
     //  list.remove(7);
